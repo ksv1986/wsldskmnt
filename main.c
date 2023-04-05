@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <shlwapi.h>
+#include <strsafe.h>
 
 #include "resource.h"
 #include "shared.h"
@@ -42,6 +43,22 @@ static HMENU getMenu(HWND hwnd)
 static HINSTANCE getInst(HWND hwnd)
 {
     return (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
+}
+
+static BOOL showNotify(HWND hwnd, PCWCH text, PCWCH title, DWORD niif)
+{
+    NOTIFYICONDATA nid = NIDINIT(nid, hwnd);
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = niif;
+    StringCchCopyW(nid.szInfo, ARRAYSIZE(nid.szInfo), text);
+    StringCchCopyW(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), title);
+    // Show the notification.
+    return Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+static BOOL showWarning(HWND hwnd, PCWCH text, PCWCH title)
+{
+    return showNotify(hwnd, text, title, NIIF_WARNING);
 }
 
 static BOOL addTrayIcon(HWND hwnd)
@@ -104,6 +121,39 @@ static void onDiskClicked(HWND hwnd, DWORD i)
     GlobalFree(hdst);
 }
 
+static void onMountClicked(HWND hwnd, DWORD i)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --bare",
+        disk->dd->DevicePath);
+
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { .cb = sizeof(si), };
+    if (!CreateProcessW(L"C:\\Windows\\System32\\wsl.exe",
+        cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        err_desc e[1] = { ERRINIT() };
+        setError(e, L"Failed to start wsl.exe");
+        showWarning(hwnd, e->msg, e->title);
+        resetErr(e);
+        return;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (exitCode) {
+        wnsprintfW(cmd, ARRAYSIZE(cmd), L"wsl.exe exit code: %d", exitCode);
+        showWarning(hwnd, cmd, L"Failed to run wsl.exe");
+    }
+}
+
 static LRESULT onCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
 {
     UINT cmd = LOWORD(wparam);
@@ -115,6 +165,10 @@ static LRESULT onCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
     default:
         if (cmd >= ID_MAIN_DISK && cmd < ID_MAIN_DISK + MAX_DISKS) {
             onDiskClicked(hwnd, cmd - ID_MAIN_DISK);
+            return 0;
+        }
+        else if (cmd >= ID_MAIN_MOUNT && cmd < ID_MAIN_MOUNT + MAX_DISKS) {
+            onMountClicked(hwnd, cmd - ID_MAIN_MOUNT);
             return 0;
         }
         return DefWindowProc(hwnd, WM_COMMAND, wparam, lparam);
@@ -145,8 +199,10 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
     HMENU menu = CreatePopupMenu();
     if (disk->e->error)
         appendError(menu, disk->e);
-    else
+    else {
         AppendMenuW(menu, MF_STRING, ID_MAIN_DISK + i, disk->dd->DevicePath);
+        AppendMenuW(menu, MF_STRING, ID_MAIN_MOUNT + i, L"&Mount");
+    }
 
     WCHAR text[512];
     wnsprintfW(text, ARRAYSIZE(text), L"Disk &%u", i);

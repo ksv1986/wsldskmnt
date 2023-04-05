@@ -3,7 +3,7 @@
 #include <initguid.h>
 #include <winioctl.h>
 
-static void resetErr(err_desc* e)
+void resetErr(err_desc* e)
 {
     e->title = NULL;
     e->msg = LocalFree(e->msg);
@@ -25,9 +25,7 @@ static void resetDisks(state* st)
     resetErr(st->e);
 }
 
-// Save GetLastError() and it's description into *e with given title
-// Returns saved error code value
-static DWORD setError(err_desc* e, LPCWCH title)
+DWORD setError(err_desc* e, LPCWCH title)
 {
     e->title = title;
     e->error = GetLastError();

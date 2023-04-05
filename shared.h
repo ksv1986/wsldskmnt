@@ -30,6 +30,14 @@ typedef struct state {
     disk_info disk[MAX_DISKS];
 } state;
 
+#define ERRINIT() { .msg = NULL }
+
+// Save GetLastError() and it's description into *e with given title
+// Returns saved error code value
+DWORD setError(err_desc* e, LPCWCH title);
+// Free resources used by error
+void resetErr(err_desc* e);
+
 // Enumerate physical disks and fill disk_info array.
 // Returns 0 on success and GetLastError() on failure.
 DWORD listDisks(state* st);
