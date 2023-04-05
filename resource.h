@@ -3,7 +3,7 @@
 // Used by wsldskmnt.rc
 //
 #define IDI_MAIN                        101
-#define IDR_MENU                        102
+#define ID_MAIN_DISK                    20000
 #define ID_MAIN_EXIT                    40001
 
 // Next default values for new objects

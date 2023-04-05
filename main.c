@@ -1,14 +1,8 @@
 #include <windows.h>
+#include <shlwapi.h>
 
 #include "resource.h"
-
-// Global program state
-typedef struct state {
-    HINSTANCE hinst;
-    HWND hwnd;
-    HMENU menu;
-    HMENU popup;
-} state;
+#include "shared.h"
 
 enum {
     APP_NOTIFY = WM_APP + 1, // Tray icon notification callback message
@@ -42,7 +36,7 @@ static void setState(HWND hwnd, state *st)
 
 static HMENU getMenu(HWND hwnd)
 {
-    return getState(hwnd)->popup;
+    return getState(hwnd)->menu;
 }
 
 static HINSTANCE getInst(HWND hwnd)
@@ -82,14 +76,47 @@ static void showContextMenu(HWND hwnd)
     TrackPopupMenuEx(getMenu(hwnd), flags, pt.x, pt.y, hwnd, NULL);
 }
 
+static void copyToClipboard(HGLOBAL hdst)
+{
+    if (!OpenClipboard(NULL))
+        return;
+
+    EmptyClipboard();
+    SetClipboardData(CF_UNICODETEXT, hdst);
+    CloseClipboard();
+}
+
+static void onDiskClicked(HWND hwnd, DWORD i)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+
+    HGLOBAL hdst = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, disk->dd->cbSize);
+    if (!hdst)
+        return;
+
+    LPWSTR dst = (LPWSTR)GlobalLock(hdst);
+    if (dst) {
+        memcpy(dst, disk->dd->DevicePath, disk->dd->cbSize);
+        GlobalUnlock(hdst);
+        copyToClipboard(hdst);
+    }
+    GlobalFree(hdst);
+}
+
 static LRESULT onCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
 {
-    switch (LOWORD(wparam))
+    UINT cmd = LOWORD(wparam);
+    switch (cmd)
     {
     case ID_MAIN_EXIT:
         DestroyWindow(hwnd);
         return 0;
     default:
+        if (cmd >= ID_MAIN_DISK && cmd < ID_MAIN_DISK + MAX_DISKS) {
+            onDiskClicked(hwnd, cmd - ID_MAIN_DISK);
+            return 0;
+        }
         return DefWindowProc(hwnd, WM_COMMAND, wparam, lparam);
     }
 }
@@ -107,14 +134,50 @@ static LRESULT onTrayCallback(HWND hwnd, WPARAM wparam, LPARAM lparam)
     return 0;
 }
 
+static void appendError(HMENU menu, err_desc* e)
+{
+    AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, e->title);
+    AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, e->msg);
+}
+
+static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
+{
+    HMENU menu = CreatePopupMenu();
+    if (disk->e->error)
+        appendError(menu, disk->e);
+    else
+        AppendMenuW(menu, MF_STRING, ID_MAIN_DISK + i, disk->dd->DevicePath);
+
+    WCHAR text[512];
+    wnsprintfW(text, ARRAYSIZE(text), L"Disk &%u", i);
+    AppendMenuW(parent, MF_STRING | MF_POPUP, (UINT_PTR)menu, text);
+}
+
+static void createDisksMenu(state* st)
+{
+    if (st->e->error)
+        appendError(st->menu, st->e);
+
+    for (DWORD i = 0; i < st->n_disks; i++)
+        createDiskMenu(st->menu, i, getDisk(st, i));
+
+    AppendMenuW(st->menu, MF_STRING, ID_MAIN_EXIT, L"&Exit");
+}
+
 static LRESULT onCreate(HWND hwnd, LPARAM lparam)
 {
     LPCREATESTRUCTW cs = (LPCREATESTRUCTW)lparam;
     state* st = cs->lpCreateParams;
 
+    listDisks(st);
+
     setState(hwnd, st);
-    st->menu = LoadMenuW(st->hinst, MAKEINTRESOURCEW(IDR_MENU));
-    st->popup = GetSubMenu(st->menu, 0);
+    st->menu = CreatePopupMenu();
+    if (!st->menu)
+        return GetLastError(); // without menu program is useless
+
+    createDisksMenu(st);
+
     if (!addTrayIcon(hwnd))
         return GetLastError();
     return 0;
