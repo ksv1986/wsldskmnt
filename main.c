@@ -74,9 +74,18 @@ static BOOL showWarning(HWND hwnd, PCWCH text, PCWCH title)
 static BOOL addTrayIcon(HWND hwnd)
 {
     NOTIFYICONDATA nid = NIDINIT(nid, hwnd);
-    nid.uFlags |= NIF_ICON | NIF_MESSAGE | NIF_SHOWTIP;
+    nid.uFlags |= NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = APP_NOTIFY;
     nid.hIcon = LoadIconW(getInst(hwnd), MAKEINTRESOURCEW(IDI_MAIN));
+    state* st = getState(hwnd);
+    DWORD n_linux = 0;
+    for (DWORD i = 0; i < st->n_disks; i++) {
+        disk_info* disk = getDisk(st, i);
+        for (DWORD p = 0; p < disk->n_parts; p++)
+            n_linux += FS_OPTS[getPart(disk, p)->fs] != NULL;
+    }
+    wnsprintfW(nid.szTip, ARRAYSIZE(nid.szTip), L"Disks: %u, Linux parts: %u",
+        st->n_disks, n_linux);
     return Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
