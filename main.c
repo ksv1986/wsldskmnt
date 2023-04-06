@@ -16,6 +16,16 @@ static const GUID GUID_NOTIFY = {
     { 0xb2, 0xf, 0xfc, 0xe3, 0x7e, 0x80, 0xd7, 0xb3 }
 };
 
+#define NAME(x, _) L#x,
+static const WCHAR* FS_NAMES[] = {
+    FS(NAME)
+};
+
+#define OP(_, x) x,
+static const WCHAR* FS_OPTS[] = {
+    FS(OP)
+};
+
 #define NIDINIT(name, hwnd) {       \
         .cbSize = sizeof(name),     \
         .hWnd = hwnd,               \
@@ -121,15 +131,8 @@ static void onDiskClicked(HWND hwnd, DWORD i)
     GlobalFree(hdst);
 }
 
-static void onMountClicked(HWND hwnd, DWORD i)
+static void execWsl(HWND hwnd, WCHAR* cmd, int cch)
 {
-    state* st = getState(hwnd);
-    disk_info* disk = getDisk(st, i);
-
-    WCHAR cmd[MAX_PATH];
-    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --bare",
-        disk->dd->DevicePath);
-
     PROCESS_INFORMATION pi;
     STARTUPINFO si = { .cb = sizeof(si), };
     if (!CreateProcessW(L"C:\\Windows\\System32\\wsl.exe",
@@ -149,9 +152,39 @@ static void onMountClicked(HWND hwnd, DWORD i)
     CloseHandle(pi.hThread);
 
     if (exitCode) {
-        wnsprintfW(cmd, ARRAYSIZE(cmd), L"wsl.exe exit code: %d", exitCode);
+        wnsprintfW(cmd, cch, L"wsl.exe exit code: %d", exitCode);
         showWarning(hwnd, cmd, L"Failed to run wsl.exe");
     }
+}
+
+static void onMountClicked(HWND hwnd, DWORD i)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --bare",
+        disk->dd->DevicePath);
+
+    execWsl(hwnd, cmd, ARRAYSIZE(cmd));
+}
+
+static void onPartClicked(HWND hwnd, DWORD i, DWORD p)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+    part_info* part = getPart(disk, p);
+    WCHAR cmd[MAX_PATH];
+
+    PCWCH mnt = FS_OPTS[part->fs];
+    if (mnt) {
+        wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --partition %u  --type %s",
+            disk->dd->DevicePath, part->number, mnt);
+        execWsl(hwnd, cmd, ARRAYSIZE(cmd));
+        return;
+    }
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"Unsupported file system %s", FS_NAMES[part->fs]);
+    MessageBoxW(hwnd, cmd, L"Unable to mount", MB_OK | MB_ICONINFORMATION);
 }
 
 static LRESULT onCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
@@ -169,6 +202,11 @@ static LRESULT onCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         }
         else if (cmd >= ID_MAIN_MOUNT && cmd < ID_MAIN_MOUNT + MAX_DISKS) {
             onMountClicked(hwnd, cmd - ID_MAIN_MOUNT);
+            return 0;
+        }
+        else if (cmd >= ID_MAIN_PART && cmd < ID_MAIN_PART + MAX_DISKS * MAX_PARTS) {
+            DWORD ip = cmd - ID_MAIN_PART;
+            onPartClicked(hwnd, ip / MAX_PARTS, ip % MAX_PARTS);
             return 0;
         }
         return DefWindowProc(hwnd, WM_COMMAND, wparam, lparam);
@@ -194,18 +232,37 @@ static void appendError(HMENU menu, err_desc* e)
     AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, e->msg);
 }
 
+static void createPartMenu(HMENU parent, DWORD i, DWORD p, part_info* part)
+{
+    HMENU menu = CreatePopupMenu();
+    if (part->e->error)
+        appendError(menu, part->e);
+    else {
+        AppendMenuW(menu, MF_STRING, ID_MAIN_PART + i * MAX_PARTS + p, L"&Mount");
+    }
+
+    WCHAR text[512];
+    wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s (%llu GB)",
+        part->number, FS_NAMES[part->fs], part->size >> 30);
+    AppendMenuW(parent, MF_STRING | MF_POPUP, (UINT_PTR)menu, text);
+}
+
 static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
 {
     HMENU menu = CreatePopupMenu();
     if (disk->e->error)
         appendError(menu, disk->e);
     else {
-        AppendMenuW(menu, MF_STRING, ID_MAIN_DISK + i, disk->dd->DevicePath);
-        AppendMenuW(menu, MF_STRING, ID_MAIN_MOUNT + i, L"&Mount");
+        for (DWORD p = 0; p < disk->n_parts; p++)
+            createPartMenu(menu, i, p, getPart(disk, p));
+
+        AppendMenuW(menu, MF_STRING, ID_MAIN_DISK + i, L"&Copy device path");
+        AppendMenuW(menu, MF_STRING, ID_MAIN_MOUNT + i, L"&Mount --bare");
     }
 
     WCHAR text[512];
-    wnsprintfW(text, ARRAYSIZE(text), L"Disk &%u", i);
+    wnsprintfW(text, ARRAYSIZE(text), L"Disk &%u: %s %u parts",
+        disk->number, disk->parttype, disk->n_parts);
     AppendMenuW(parent, MF_STRING | MF_POPUP, (UINT_PTR)menu, text);
 }
 

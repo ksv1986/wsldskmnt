@@ -3,17 +3,17 @@
 #include <windows.h>
 #include <setupapi.h>
 
-#define FS(OP)  \
-    OP(NONE)    \
-    OP(FAT32)   \
-    OP(EXFAT)   \
-    OP(NTFS)    \
-    OP(BITLOCKER) \
-    OP(EXT4)    \
-    OP(XFS)     \
-    OP(BTRFS)   \
+#define FS(OP)                  \
+    OP(NONE,        NULL)       \
+    OP(FAT32,       NULL)       \
+    OP(EXFAT,       NULL)       \
+    OP(NTFS,        NULL)       \
+    OP(BITLOCKER,   NULL)       \
+    OP(EXT4,        L"ext4")    \
+    OP(XFS,         L"xfs")     \
+    OP(BTRFS,       L"btrfs")   \
 
-#define ENUM(x) FS_ ## x,
+#define ENUM(x, _) FS_ ## x,
 typedef enum fs_type {
     FS(ENUM)
 } fs_type;

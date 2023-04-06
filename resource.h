@@ -5,6 +5,7 @@
 #define IDI_MAIN                        101
 #define ID_MAIN_DISK                    20000
 #define ID_MAIN_MOUNT                   21000
+#define ID_MAIN_PART                    22000
 #define ID_MAIN_EXIT                    40001
 
 // Next default values for new objects
