@@ -54,6 +54,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <AdditionalDependencies>ole32.lib;wbemuuid.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -71,9 +72,11 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <AdditionalDependencies>ole32.lib;wbemuuid.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="disk.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="memset.c" />
   </ItemGroup>
