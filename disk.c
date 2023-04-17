@@ -175,6 +175,29 @@ static HRESULT locatorListDisks(state* st, IWbemLocator* pLoc)
     return hr;
 }
 
+static void swapDisks(disk_info* l, disk_info* r)
+{
+    disk_info t[1];
+    *t = *l;
+    *l = *r;
+    *r = *t;
+}
+
+static void sortDisks(state* st)
+{
+    if (st->n_disks < 2)
+        return;
+
+    for (DWORD x = 0; x < st->n_disks - 1; x++) {
+        for (DWORD y = 0; y < st->n_disks - x - 1; y++) {
+            disk_info* l = getDisk(st, y);
+            disk_info* r = getDisk(st, y + 1);
+            if (l->index > r->index)
+                swapDisks(l, r);
+        }
+    }
+}
+
 HRESULT listDisks(state* st)
 {
     IWbemLocator* pLoc = NULL;
@@ -186,5 +209,7 @@ HRESULT listDisks(state* st)
 
     hr = locatorListDisks(st, pLoc);
     pLoc->lpVtbl->Release(pLoc);
+
+    sortDisks(st);
     return hr;
 }
