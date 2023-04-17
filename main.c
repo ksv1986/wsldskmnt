@@ -99,27 +99,36 @@ static void showContextMenu(HWND hwnd)
 
 static void execWsl(HWND hwnd, WCHAR* cmd, int cch)
 {
-    PROCESS_INFORMATION pi;
-    STARTUPINFO si = { .cb = sizeof(si), };
-    if (!CreateProcessW(L"C:\\Windows\\System32\\wsl.exe",
-        cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
-    {
+    SHELLEXECUTEINFO sei = {
+        .cbSize = sizeof(sei),
+        .fMask = SEE_MASK_NOCLOSEPROCESS,
+        .lpVerb = L"runas",
+        .lpFile = L"C:\\Windows\\System32\\wsl.exe",
+        .lpParameters = cmd,
+        .hwnd = hwnd,
+        .nShow = SW_NORMAL,
+    };
+    if (ShellExecuteExW(&sei)) {
+        HANDLE proc = sei.hProcess;
+        WaitForSingleObject(proc, INFINITE);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(proc, &exitCode);
+        CloseHandle(proc);
+
+        if (exitCode) {
+            wnsprintfW(cmd, cch, L"wsl.exe exit code: %d", exitCode);
+            showWarning(hwnd, cmd, L"Failed to run wsl.exe");
+        }
+    }
+    else {
+        DWORD code = GetLastError();
+        if (code == ERROR_CANCELLED)
+            return;
+
         err_desc e[1] = { ERRINIT() };
-        setError(e, L"Failed to start wsl.exe");
+        setErrorCode(e, L"Failed to start wsl.exe", code);
         showWarning(hwnd, e->text, e->title);
         resetErr(e);
-        return;
-    }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-
-    DWORD exitCode = 1;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    if (exitCode) {
-        wnsprintfW(cmd, cch, L"wsl.exe exit code: %d", exitCode);
-        showWarning(hwnd, cmd, L"Failed to run wsl.exe");
     }
 }
 

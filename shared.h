@@ -40,6 +40,7 @@ void resetErr(err_desc* e);
 
 
 DWORD setError(err_desc* e, PCWCH title);
+DWORD setErrorCode(err_desc* e, PCWCH title, DWORD code);
 
 // Enumerate physical disks and fill disk_info array.
 // Returns 0 on success and GetLastError() on failure.
