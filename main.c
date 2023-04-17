@@ -10,6 +10,7 @@ enum {
     APP_NOTIFY = WM_APP + 1, // Tray icon notification callback message
     MENU_EXIT = 40001,
     MENU_COPY = 40100,
+    MENU_MOUNT = 40200,
 };
 // Tray icon will be identified by guid
 static const GUID GUID_NOTIFY = {
@@ -48,6 +49,22 @@ static HINSTANCE getInst(HWND hwnd)
     return (HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
 }
 
+static BOOL showNotify(HWND hwnd, PCWCH text, PCWCH title, DWORD niif)
+{
+    NOTIFYICONDATA nid = NIDINIT(nid, hwnd);
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = niif;
+    StringCchCopyW(nid.szInfo, ARRAYSIZE(nid.szInfo), text);
+    StringCchCopyW(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), title);
+    // Show the notification.
+    return Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+static BOOL showWarning(HWND hwnd, PCWCH text, PCWCH title)
+{
+    return showNotify(hwnd, text, title, NIIF_WARNING);
+}
+
 static BOOL addTrayIcon(HWND hwnd)
 {
     NOTIFYICONDATA nid = NIDINIT(nid, hwnd);
@@ -78,6 +95,43 @@ static void showContextMenu(HWND hwnd)
         flags |= TPM_LEFTALIGN;
 
     TrackPopupMenuEx(getMenu(hwnd), flags, pt.x, pt.y, hwnd, NULL);
+}
+
+static void execWsl(HWND hwnd, WCHAR* cmd, int cch)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { .cb = sizeof(si), };
+    if (!CreateProcessW(L"C:\\Windows\\System32\\wsl.exe",
+        cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        err_desc e[1] = { ERRINIT() };
+        setError(e, L"Failed to start wsl.exe");
+        showWarning(hwnd, e->text, e->title);
+        resetErr(e);
+        return;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (exitCode) {
+        wnsprintfW(cmd, cch, L"wsl.exe exit code: %d", exitCode);
+        showWarning(hwnd, cmd, L"Failed to run wsl.exe");
+    }
+}
+
+static void onMountClicked(HWND hwnd, DWORD i)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --bare", disk->path);
+
+    execWsl(hwnd, cmd, ARRAYSIZE(cmd));
 }
 
 static void copyToClipboard(HGLOBAL hdst)
@@ -123,6 +177,10 @@ static LRESULT onMenuCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
             onCopyClicked(hwnd, cmd - MENU_COPY);
             return 0;
         }
+        if (cmd >= MENU_MOUNT && cmd < MENU_MOUNT + MAX_DISKS) {
+            onMountClicked(hwnd, cmd - MENU_MOUNT);
+            return 0;
+        }
         return DefWindowProc(hwnd, WM_COMMAND, wparam, lparam);
     }
 }
@@ -153,6 +211,7 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
         appendError(menu, disk->e);
     else {
         AppendMenuW(menu, MF_STRING, MENU_COPY + i, L"&Copy device path");
+        AppendMenuW(menu, MF_STRING, MENU_MOUNT + i, L"&Mount --bare");
     }
     WCHAR text[256] = L"";
     wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u parts",
