@@ -58,7 +58,7 @@ static DWORD returnErr(err_desc* e)
     }
 }
 
-static DWORD setErrorCode(err_desc* e, PCWCH title, DWORD code)
+DWORD setErrorCode(err_desc* e, PCWCH title, DWORD code)
 {
     e->title = title;
     e->error = code;
