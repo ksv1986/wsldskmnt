@@ -213,7 +213,7 @@ static void appendError(HMENU menu, err_desc* e)
     AppendMenuW(menu, MF_STRING | MF_DISABLED, 0, e->text);
 }
 
-static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
+static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shield)
 {
     HMENU menu = CreatePopupMenu();
     if (disk->e->error)
@@ -221,6 +221,8 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk)
     else {
         AppendMenuW(menu, MF_STRING, MENU_COPY + i, L"&Copy device path");
         AppendMenuW(menu, MF_STRING, MENU_MOUNT + i, L"&Mount --bare");
+        if (shield)
+            SetMenuItemBitmaps(menu, MENU_MOUNT + i, MF_BYCOMMAND, shield, shield);
     }
     WCHAR text[256] = L"";
     wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u parts",
@@ -235,9 +237,30 @@ static void createDisksMenu(state* st)
         appendError(st->menu, st->e);
 
     for (DWORD i = 0; i < st->n_disks; i++)
-        createDiskMenu(st->menu, i, getDisk(st, i));
+        createDiskMenu(st->menu, i, getDisk(st, i), st->shield);
 
     AppendMenuW(st->menu, MF_STRING, MENU_EXIT, L"&Exit");
+}
+
+static HBITMAP convertToBitmap(HICON icon)
+{
+    ICONINFOEX ii = { .cbSize = sizeof(ii), };
+    if (!GetIconInfoExW(icon, &ii))
+        return 0;
+
+    return CopyImage(ii.hbmColor, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+}
+
+static HBITMAP createShieldBitmap(void)
+{
+    SHSTOCKICONINFO ssii = { .cbSize = sizeof(ssii), };
+    HRESULT hr = SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON | SHGSI_SMALLICON, &ssii);
+    if (FAILED(hr))
+        return 0;
+
+    HBITMAP bitmap = convertToBitmap(ssii.hIcon);
+    DestroyIcon(ssii.hIcon);
+    return bitmap;
 }
 
 static LRESULT onCreate(HWND hwnd, LPARAM lparam)
@@ -260,6 +283,7 @@ static LRESULT onCreate(HWND hwnd, LPARAM lparam)
     if (!st->menu)
         return GetLastError(); // without menu program is useless
 
+    st->shield = createShieldBitmap();
     createDisksMenu(st);
 
     if (!addTrayIcon(hwnd))
@@ -273,6 +297,8 @@ static void onDestroy(HWND hwnd)
 
     removeTrayIcon(hwnd);
     DestroyMenu(st->menu);
+    DeleteObject(st->shield);
+
     resetDisks(st);
 
     CoUninitialize();

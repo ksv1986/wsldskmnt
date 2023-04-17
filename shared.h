@@ -29,6 +29,7 @@ typedef struct state {
     HINSTANCE hinst;
     HWND hwnd;
     HMENU menu;
+    HBITMAP shield;
 
     err_desc e[1]; // if there was a problem to enumerate disks
     DWORD n_disks;
