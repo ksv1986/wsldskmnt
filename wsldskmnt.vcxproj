@@ -77,6 +77,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="disk.c" />
+    <ClCompile Include="load_config.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="memset.c" />
   </ItemGroup>

@@ -24,6 +24,9 @@
     <ClCompile Include="disk.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="load_config.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
