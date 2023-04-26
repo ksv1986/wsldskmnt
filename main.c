@@ -11,6 +11,7 @@ enum {
     MENU_EXIT = 40001,
     MENU_COPY = 40100,
     MENU_MOUNT = 40200,
+    MENU_UNMOUNT = 40300,
 };
 // Tray icon will be identified by guid
 static const GUID GUID_NOTIFY = {
@@ -146,6 +147,17 @@ static void onMountClicked(HWND hwnd, DWORD i)
     execWsl(hwnd, cmd, ARRAYSIZE(cmd));
 }
 
+static void onUnmountClicked(HWND hwnd, DWORD i)
+{
+    state* st = getState(hwnd);
+    disk_info* disk = getDisk(st, i);
+
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--unmount \"%s\"", disk->path);
+
+    execWsl(hwnd, cmd, ARRAYSIZE(cmd));
+}
+
 static void copyToClipboard(HGLOBAL hdst)
 {
     if (!OpenClipboard(NULL))
@@ -178,6 +190,18 @@ static void onCopyClicked(HWND hwnd, DWORD i)
 
 static LRESULT onMenuCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
 {
+    typedef struct {
+        UINT cmd;
+        void (*cb)(HWND, DWORD);
+    } dispatch;
+
+    static const dispatch table[] = {
+        {MENU_COPY,     onCopyClicked},
+        {MENU_MOUNT,    onMountClicked},
+        {MENU_UNMOUNT,  onUnmountClicked},
+        {0, NULL}
+    };
+
     const UINT cmd = LOWORD(wparam);
     switch (cmd)
     {
@@ -185,13 +209,11 @@ static LRESULT onMenuCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         DestroyWindow(hwnd);
         return 0;
     default:
-        if (cmd >= MENU_COPY && cmd < MENU_COPY + MAX_DISKS) {
-            onCopyClicked(hwnd, cmd - MENU_COPY);
-            return 0;
-        }
-        if (cmd >= MENU_MOUNT && cmd < MENU_MOUNT + MAX_DISKS) {
-            onMountClicked(hwnd, cmd - MENU_MOUNT);
-            return 0;
+        for (const dispatch* d = table; d->cmd; ++d) {
+            if (cmd >= d->cmd && cmd < d->cmd + MAX_DISKS) {
+                d->cb(hwnd, cmd - d->cmd);
+                return 0;
+            }
         }
         return DefWindowProc(hwnd, WM_COMMAND, wparam, lparam);
     }
@@ -224,8 +246,11 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
     else {
         AppendMenuW(menu, MF_STRING, MENU_COPY + i, L"&Copy device path");
         AppendMenuW(menu, MF_STRING, MENU_MOUNT + i, L"&Mount --bare");
-        if (shield)
+        AppendMenuW(menu, MF_STRING, MENU_UNMOUNT + i, L"&Unmount");
+        if (shield) {
             SetMenuItemBitmaps(menu, MENU_MOUNT + i, MF_BYCOMMAND, shield, shield);
+            SetMenuItemBitmaps(menu, MENU_UNMOUNT + i, MF_BYCOMMAND, shield, shield);
+        }
     }
     WCHAR text[256] = L"";
     wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u parts",
