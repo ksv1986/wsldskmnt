@@ -397,6 +397,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hinst, _In_opt_ HINSTANCE hprev, _In_ PWSTR a
         DispatchMessageW(msg);
     }
 
+    TerminateProcess(GetCurrentProcess(), (UINT)msg->wParam);
     return (int)msg->wParam;
 }
 
