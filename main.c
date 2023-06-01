@@ -21,6 +21,8 @@ static const GUID GUID_NOTIFY = {
     { 0xb2, 0xf, 0xfc, 0xe3, 0x7e, 0x80, 0xd7, 0xb3 }
 };
 
+static const WCHAR* WSL_PATH = L"C:\\Windows\\System32\\wsl.exe";
+
 #define NIDINIT(name, hwnd) {       \
         .cbSize = sizeof(name),     \
         .hWnd = hwnd,               \
@@ -101,13 +103,31 @@ static void showContextMenu(HWND hwnd)
     TrackPopupMenuEx(getMenu(hwnd), flags, pt.x, pt.y, hwnd, NULL);
 }
 
-static void execWsl(HWND hwnd, WCHAR* cmd, int cch)
+static void onWslExitCode(HWND hwnd, int exitCode)
+{
+    if (!exitCode)
+        return;
+
+    WCHAR cmd[128];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"wsl.exe exit code: %d", exitCode);
+    showWarning(hwnd, cmd, L"Failed to run wsl.exe");
+}
+
+static void onWslRunFailure(HWND hwnd, DWORD code)
+{
+    err_desc e[1] = { ERRINIT() };
+    setErrorCode(e, L"Failed to start wsl.exe", code);
+    showWarning(hwnd, e->text, e->title);
+    resetErr(e);
+}
+
+static void runWslAs(HWND hwnd, WCHAR* cmd)
 {
     SHELLEXECUTEINFO sei = {
         .cbSize = sizeof(sei),
         .fMask = SEE_MASK_NOCLOSEPROCESS,
         .lpVerb = L"runas",
-        .lpFile = L"C:\\Windows\\System32\\wsl.exe",
+        .lpFile = WSL_PATH,
         .lpParameters = cmd,
         .hwnd = hwnd,
         .nShow = SW_NORMAL,
@@ -119,21 +139,37 @@ static void execWsl(HWND hwnd, WCHAR* cmd, int cch)
         GetExitCodeProcess(proc, &exitCode);
         CloseHandle(proc);
 
-        if (exitCode) {
-            wnsprintfW(cmd, cch, L"wsl.exe exit code: %d", exitCode);
-            showWarning(hwnd, cmd, L"Failed to run wsl.exe");
-        }
+        onWslExitCode(hwnd, exitCode);
     }
     else {
         DWORD code = GetLastError();
-        if (code == ERROR_CANCELLED)
-            return;
-
-        err_desc e[1] = { ERRINIT() };
-        setErrorCode(e, L"Failed to start wsl.exe", code);
-        showWarning(hwnd, e->text, e->title);
-        resetErr(e);
+        if (code != ERROR_CANCELLED)
+            onWslRunFailure(hwnd, code);
     }
+}
+
+static void execWsl(HWND hwnd, WCHAR* cmd)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { .cb = sizeof(si), };
+    // command line must start with executable name
+    WCHAR text[1024];
+    wnsprintfW(text, ARRAYSIZE(text), L"wsl.exe %s", cmd);
+    cmd = text;
+    if (!CreateProcessW(WSL_PATH,
+        cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        onWslRunFailure(hwnd, GetLastError());
+        return;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    onWslExitCode(hwnd, exitCode);
 }
 
 static void onMountClicked(HWND hwnd, DWORD i)
@@ -144,7 +180,7 @@ static void onMountClicked(HWND hwnd, DWORD i)
     WCHAR cmd[MAX_PATH];
     wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount \"%s\" --bare", disk->path);
 
-    execWsl(hwnd, cmd, ARRAYSIZE(cmd));
+    runWslAs(hwnd, cmd);
 }
 
 static void onUnmountClicked(HWND hwnd, DWORD i)
@@ -153,9 +189,9 @@ static void onUnmountClicked(HWND hwnd, DWORD i)
     disk_info* disk = getDisk(st, i);
 
     WCHAR cmd[MAX_PATH];
-    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--unmount \"%s\"", disk->path);
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--unmount %s", disk->path);
 
-    execWsl(hwnd, cmd, ARRAYSIZE(cmd));
+    execWsl(hwnd, cmd);
 }
 
 static void copyToClipboard(HGLOBAL hdst)
@@ -249,7 +285,6 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
         AppendMenuW(menu, MF_STRING, MENU_UNMOUNT + i, L"&Unmount");
         if (shield) {
             SetMenuItemBitmaps(menu, MENU_MOUNT + i, MF_BYCOMMAND, shield, shield);
-            SetMenuItemBitmaps(menu, MENU_UNMOUNT + i, MF_BYCOMMAND, shield, shield);
         }
     }
     WCHAR text[256] = L"";
