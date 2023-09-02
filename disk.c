@@ -16,11 +16,22 @@ void resetErr(err_desc* e)
     e->error = 0;
 }
 
+static void resetPart(part_info* part)
+{
+    part->index = 0;
+    part->size = 0;
+}
+
 static void resetDisk(disk_info* disk)
 {
     disk->model = LocalFree(disk->model);
+    while (disk->n_parts) {
+        disk->n_parts--;
+        resetPart(getPart(disk, disk->n_parts));
+    }
     disk->n_parts = 0;
     resetErr(disk->e);
+    resetErr(disk->e_parts);
 }
 
 void resetDisks(state* st)
@@ -97,16 +108,79 @@ static HRESULT setHresult(err_desc* e, PCWCH title, HRESULT hr)
     return returnErr(e);
 }
 
+static ULONGLONG wtou64(const WCHAR *s)
+{
+    ULONGLONG r = 0;
+    for (;;) {
+        switch (*s) {
+        case 0:
+            return r;
+        case L'0': case L'1': case L'2': case L'3': case L'4':
+        case L'5': case L'6': case L'7': case L'8': case L'9':
+            r = r * 10 + (*s - L'0');
+            s++;
+            break;
+        default:
+            return 0;
+        }
+    }
+}
+
+static void initPart(part_info* part, IWbemClassObject* pCls)
+{
+    VARIANT v[1];
+    VariantInit(v);
+#define GET(name, copy)                                                     \
+    do {                                                                    \
+        HRESULT hr = pCls->lpVtbl->Get(pCls, L#name, 0, v, NULL, NULL);     \
+        if (!FAILED(hr))                                                    \
+            copy;                                                           \
+        VariantClear(v);                                                    \
+    } while (0)
+
+    GET(Index, part->index = v->uintVal);
+    // for some reason uint64 value is returned as string
+    GET(Size, part->size = wtou64(v->bstrVal));
+#undef GET
+}
+
+static HRESULT listParts(disk_info* disk, IWbemServices* pSvc)
+{
+    WCHAR query[64];
+    wnsprintfW(query, ARRAYSIZE(query), L"SELECT * from Win32_DiskPartition WHERE DiskIndex = %u", disk->index);
+
+    IEnumWbemClassObject* pEnum = NULL;
+    HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
+    if (FAILED(hr))
+        return setHresult(disk->e_parts, L"IWbemServices::ExecQuery failed", hr);
+
+    DWORD i = 0;
+    IWbemClassObject* pCls = NULL;
+    ULONG nr = 0;
+    for (pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr); nr;
+        pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr))
+    {
+        initPart(getPart(disk, i), pCls);
+        pCls->lpVtbl->Release(pCls);
+
+        i++;
+        if (i == MAX_PARTS || i == disk->n_parts)
+            break;
+    }
+
+    pEnum->lpVtbl->Release(pEnum);
+    return 0;
+}
+
 static HRESULT initDisk(disk_info* disk, IWbemClassObject* pCls)
 {
     // https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-diskdrive
-    HRESULT hr;
     VARIANT v[1];
     VariantInit(v);
 
 #define GET(name, copy)                                                     \
     do {                                                                    \
-        hr = pCls->lpVtbl->Get(pCls, L#name, 0, v, NULL, NULL);             \
+        HRESULT hr = pCls->lpVtbl->Get(pCls, L#name, 0, v, NULL, NULL);     \
         if (FAILED(hr))                                                     \
             return setHresult(disk->e, L"Failed to get disk " L#name, hr);  \
         copy;                                                               \
@@ -149,12 +223,14 @@ static HRESULT servicesListDisks(state* st, IWbemServices * pSvc)
     for (pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr); nr;
          pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr))
     {
-        disk_info* disk = &st->disk[st->n_disks];
+        disk_info* disk = getDisk(st, st->n_disks);
         st->n_disks++;
 
         initDisk(disk, pCls);
 
         pCls->lpVtbl->Release(pCls);
+
+        listParts(disk, pSvc);
 
         if (st->n_disks == MAX_DISKS)
             break;

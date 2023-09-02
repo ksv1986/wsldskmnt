@@ -5,6 +5,8 @@
 // Dynamic allocations are good if we need lots of memory.
 // But this a simple program. It has simple needs.
 #define MAX_DISKS 32
+#define MAX_PARTS 16
+#define MAX_PART_TYPE 64
 #define MAX_DRIVE_PATH 24
 
 // Container for readable error message with a title
@@ -16,12 +18,19 @@ typedef struct err_desc {
 
 #define ERRINIT() { .text = L"" }
 
+typedef struct part_info {
+    DWORD index;
+    ULONGLONG size;
+} part_info;
+
 typedef struct disk_info {
     err_desc e[1];
     DWORD index;
     PWCHAR model;
     WCHAR path[MAX_DRIVE_PATH];
     DWORD n_parts;
+    err_desc e_parts[1];
+    part_info part[MAX_PARTS];
 } disk_info;
 
 // Global program state
@@ -51,4 +60,9 @@ void resetDisks(state* st);
 static __inline disk_info* getDisk(state* st, DWORD i)
 {
     return &st->disk[i];
+}
+
+static __inline part_info* getPart(disk_info* disk, DWORD i)
+{
+    return &disk->part[i];
 }
