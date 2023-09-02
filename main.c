@@ -103,14 +103,15 @@ static void showContextMenu(HWND hwnd)
     TrackPopupMenuEx(getMenu(hwnd), flags, pt.x, pt.y, hwnd, NULL);
 }
 
-static void onWslExitCode(HWND hwnd, int exitCode)
+static DWORD onWslRunAs(HWND hwnd, DWORD exitCode)
 {
     if (!exitCode)
-        return;
+        return 0;
 
-    WCHAR cmd[128];
-    wnsprintfW(cmd, ARRAYSIZE(cmd), L"wsl.exe exit code: %d", exitCode);
-    showWarning(hwnd, cmd, L"Failed to run wsl.exe");
+    WCHAR text[128];
+    wnsprintfW(text, ARRAYSIZE(text), L"wsl.exe exit code: %d", exitCode);
+    showWarning(hwnd, text, L"Failed to run wsl.exe");
+    return exitCode;
 }
 
 static void onWslRunFailure(HWND hwnd, DWORD code)
@@ -139,7 +140,7 @@ static void runWslAs(HWND hwnd, WCHAR* cmd)
         GetExitCodeProcess(proc, &exitCode);
         CloseHandle(proc);
 
-        onWslExitCode(hwnd, exitCode);
+        onWslRunAs(hwnd, exitCode);
     }
     else {
         DWORD code = GetLastError();
@@ -148,28 +149,97 @@ static void runWslAs(HWND hwnd, WCHAR* cmd)
     }
 }
 
-static void execWsl(HWND hwnd, WCHAR* cmd)
+static void closeIfOpen(HANDLE* ph)
+{
+    if (*ph)
+        CloseHandle(*ph);
+    *ph = INVALID_HANDLE_VALUE;
+}
+
+static void closeStdHandles(STARTUPINFO* si, HANDLE* pout)
+{
+    closeIfOpen(&si->hStdOutput);
+    closeIfOpen(pout);
+    si->dwFlags &= ~STARTF_USESTDHANDLES;
+}
+
+static void openStdHandles(STARTUPINFO* si, HANDLE* pout)
+{
+    SECURITY_ATTRIBUTES sa = {
+        .nLength = sizeof(sa),
+        .bInheritHandle = TRUE,
+    };
+    si->hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si->hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    if (!CreatePipe(pout, &si->hStdOutput, &sa, 0)) {
+        closeStdHandles(si, pout);
+        return;
+    }
+    SetHandleInformation(*pout, HANDLE_FLAG_INHERIT, 0);
+    si->dwFlags |= STARTF_USESTDHANDLES;
+}
+
+typedef DWORD (*cmd_cb)(HWND hwnd, DWORD exitCode, const WCHAR* text, DWORD cch);
+
+static DWORD execWslAndThen(HWND hwnd, WCHAR* cmd, cmd_cb cb)
 {
     PROCESS_INFORMATION pi;
+    HANDLE out = 0;
     STARTUPINFO si = { .cb = sizeof(si), };
     // command line must start with executable name
     WCHAR text[1024];
     wnsprintfW(text, ARRAYSIZE(text), L"wsl.exe %s", cmd);
     cmd = text;
+
+    openStdHandles(&si, &out);
     if (!CreateProcessW(WSL_PATH,
-        cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+        cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
     {
         onWslRunFailure(hwnd, GetLastError());
-        return;
+        closeStdHandles(&si, &out);
+        return ~0u;
     }
+    closeIfOpen(&si.hStdOutput);
+
+    BYTE* buf = (BYTE*)text;
+    BYTE* p = buf;
+    DWORD sz = sizeof(text) - sizeof(WCHAR);
+    do {
+        DWORD n;
+        if (!ReadFile(out, p, sz, &n, NULL))
+            break;
+        sz -= n;
+        p += n;
+    } while (sz);
+    closeIfOpen(&out);
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     DWORD exitCode = 1;
     GetExitCodeProcess(pi.hProcess, &exitCode);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+    closeStdHandles(&si, &out);
 
-    onWslExitCode(hwnd, exitCode);
+    const DWORD cch = (DWORD)(p - buf) / sizeof(WCHAR);
+    text[cch] = 0;
+
+    return cb(hwnd, exitCode, text, cch);
+}
+
+static DWORD onWslExit(HWND hwnd, DWORD exitCode, const WCHAR* text, DWORD cch)
+{
+    UNREFERENCED_PARAMETER(cch);
+    if (exitCode) {
+        WCHAR title[128];
+        wnsprintfW(title, ARRAYSIZE(title), L"wsl.exe exit code: %d", exitCode);
+        showWarning(hwnd, text, title);
+    }
+    return exitCode;
+}
+
+static void execWsl(HWND hwnd, WCHAR* cmd)
+{
+    execWslAndThen(hwnd, cmd, onWslExit);
 }
 
 static void onMountClicked(HWND hwnd, DWORD i)
