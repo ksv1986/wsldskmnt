@@ -40,6 +40,8 @@ typedef struct state {
     HMENU menu;
     HBITMAP shield;
 
+    WCHAR dist[256]; // default wsl distribution name
+
     err_desc e[1]; // if there was a problem to enumerate disks
     DWORD n_disks;
     disk_info disk[MAX_DISKS];

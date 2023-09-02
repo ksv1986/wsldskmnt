@@ -443,6 +443,52 @@ static HBITMAP createShieldBitmap(void)
     return bitmap;
 }
 
+static DWORD parseDistroList(HWND hwnd, DWORD exitCode, const WCHAR* text, DWORD cch)
+{
+    state* st = getState(hwnd);
+    st->dist[0] = 0;
+
+    if (exitCode)
+        return onWslExit(hwnd, exitCode, text, cch);
+
+    for (;;) {
+        switch (*text) {
+        case 0:
+            return 0;
+
+        case L'*': // found
+            // skip "* "
+            ++text;
+            ++text;
+            // copy name of the distro
+            const WCHAR * sep = text;
+            WCHAR *p = st->dist;
+            while (*sep && *sep != L'\t' && *sep != L' ')
+                *p++ = *sep++;
+            *p = 0;
+            return 0;
+
+        default:
+            // goto next line
+            while (*text && *text != L'\r' && *text != '\n')
+                ++text;
+            while (*text && (*text == L'\r' || *text == L'\n'))
+                ++text;
+        }
+    }
+}
+
+static void getDefaultDistribution(HWND hwnd, state *st)
+{
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--list -v");
+    execWslAndThen(hwnd, cmd, parseDistroList);
+    const WCHAR* text = L"No distribution";
+    if (st->dist[0])
+        text = st->dist;
+    InsertMenuW(st->menu, 0, MF_BYPOSITION | MF_STRING | MF_DISABLED, 0, st->dist);
+}
+
 static LRESULT onCreate(HWND hwnd, LPARAM lparam)
 {
     LPCREATESTRUCTW cs = (LPCREATESTRUCTW)lparam;
@@ -468,6 +514,8 @@ static LRESULT onCreate(HWND hwnd, LPARAM lparam)
 
     if (!addTrayIcon(hwnd))
         return GetLastError();
+
+    getDefaultDistribution(hwnd, st);
     return 0;
 }
 
