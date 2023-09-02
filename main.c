@@ -6,12 +6,15 @@
 #include <shlwapi.h>
 #include <strsafe.h>
 
+#define MAX_CMD (MAX_DISKS * MAX_PARTS)
+
 enum {
     APP_NOTIFY = WM_APP + 1, // Tray icon notification callback message
     MENU_EXIT = 40001,
-    MENU_COPY = 40100,
-    MENU_MOUNT = 40200,
-    MENU_UNMOUNT = 40300,
+    MENU_COPY = 41000,
+    MENU_MOUNT = 42000,
+    MENU_UNMOUNT = 43000,
+    MENU_PART = 44000,
 };
 // Tray icon will be identified by guid
 static const GUID GUID_NOTIFY = {
@@ -253,6 +256,20 @@ static void onMountClicked(HWND hwnd, DWORD i)
     runWslAs(hwnd, cmd);
 }
 
+static void onPartClicked(HWND hwnd, DWORD n)
+{
+    state* st = getState(hwnd);
+    DWORD i = n / MAX_PARTS;
+    DWORD j = n % MAX_PARTS;
+    disk_info* disk = getDisk(st, i);
+    part_info* part = getPart(disk, j);
+
+    WCHAR cmd[MAX_PATH];
+    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount %s --partition %u", disk->path, part->index + 1);
+
+    runWslAs(hwnd, cmd);
+}
+
 static void onUnmountClicked(HWND hwnd, DWORD i)
 {
     state* st = getState(hwnd);
@@ -305,6 +322,7 @@ static LRESULT onMenuCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         {MENU_COPY,     onCopyClicked},
         {MENU_MOUNT,    onMountClicked},
         {MENU_UNMOUNT,  onUnmountClicked},
+        {MENU_PART,     onPartClicked},
         {0, NULL}
     };
 
@@ -316,7 +334,7 @@ static LRESULT onMenuCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         return 0;
     default:
         for (const dispatch* d = table; d->cmd; ++d) {
-            if (cmd >= d->cmd && cmd < d->cmd + MAX_DISKS) {
+            if (cmd >= d->cmd && cmd < d->cmd + MAX_CMD) {
                 d->cb(hwnd, cmd - d->cmd);
                 return 0;
             }
@@ -347,17 +365,46 @@ static void appendError(HMENU menu, err_desc* e)
 static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shield)
 {
     HMENU menu = CreatePopupMenu();
+    WCHAR text[256] = L"";
+
     if (disk->e->error)
         appendError(menu, disk->e);
     else {
         AppendMenuW(menu, MF_STRING, MENU_COPY + i, L"&Copy device path");
         AppendMenuW(menu, MF_STRING, MENU_MOUNT + i, L"&Mount --bare");
-        AppendMenuW(menu, MF_STRING, MENU_UNMOUNT + i, L"&Unmount");
-        if (shield) {
+        if (shield)
             SetMenuItemBitmaps(menu, MENU_MOUNT + i, MF_BYCOMMAND, shield, shield);
-        }
+
+        if (disk->e_parts->error)
+            appendError(menu, disk->e_parts);
+        else
+            for (DWORD j = 0; j < disk->n_parts; ++j) {
+                part_info* part = getPart(disk, j);
+                const WCHAR* suffix = L"MB";
+
+                ULONGLONG hi = part->size >> 10;
+                if (hi > (1000<<10)) {
+                    suffix = L"GB";
+                    hi >>= 10;
+                }
+                DWORD lo = hi % 1000;
+                hi /= 1000;
+
+                if (hi < 10 && lo > 100)
+                    wnsprintfW(text, ARRAYSIZE(text), L"Part %u: %llu.%u%s",
+                        part->index, hi, lo / 10, suffix);
+                else
+                    wnsprintfW(text, ARRAYSIZE(text), L"Part #%u: %llu%s",
+                        part->index, hi, suffix);
+
+                const DWORD n = MENU_PART + i * MAX_PARTS + j;
+                AppendMenuW(menu, MF_STRING, n, text);
+                if (shield)
+                    SetMenuItemBitmaps(menu, n, MF_BYCOMMAND, shield, shield);
+            }
+
+        AppendMenuW(menu, MF_STRING, MENU_UNMOUNT + i, L"&Unmount");
     }
-    WCHAR text[256] = L"";
     wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u parts",
         disk->index, disk->model, disk->n_parts);
     text[ARRAYSIZE(text) - 1] = 0;
