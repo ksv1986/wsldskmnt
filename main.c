@@ -125,7 +125,7 @@ static void onWslRunFailure(HWND hwnd, DWORD code)
     resetErr(e);
 }
 
-static void runWslAs(HWND hwnd, WCHAR* cmd)
+static DWORD runWslAs(HWND hwnd, WCHAR* cmd)
 {
     SHELLEXECUTEINFO sei = {
         .cbSize = sizeof(sei),
@@ -143,12 +143,13 @@ static void runWslAs(HWND hwnd, WCHAR* cmd)
         GetExitCodeProcess(proc, &exitCode);
         CloseHandle(proc);
 
-        onWslRunAs(hwnd, exitCode);
+        return onWslRunAs(hwnd, exitCode);
     }
     else {
         DWORD code = GetLastError();
         if (code != ERROR_CANCELLED)
             onWslRunFailure(hwnd, code);
+        return code;
     }
 }
 
@@ -256,6 +257,14 @@ static void onMountClicked(HWND hwnd, DWORD i)
     runWslAs(hwnd, cmd);
 }
 
+static BOOL directoryExists(const WCHAR *path)
+{
+    DWORD dwAttrib = GetFileAttributesW(path);
+
+    return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+        (dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
 static void onPartClicked(HWND hwnd, DWORD n)
 {
     state* st = getState(hwnd);
@@ -263,11 +272,31 @@ static void onPartClicked(HWND hwnd, DWORD n)
     DWORD j = n % MAX_PARTS;
     disk_info* disk = getDisk(st, i);
     part_info* part = getPart(disk, j);
+    DWORD p = part->index + 1;
+    WCHAR path[MAX_PATH];
 
-    WCHAR cmd[MAX_PATH];
-    wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount %s --partition %u", disk->path, part->index + 1);
+    const WCHAR* name = NULL;
+    for (const WCHAR* c = disk->path; *c; ++c)
+        if (*c == L'\\')
+            name = c + 1;
 
-    runWslAs(hwnd, cmd);
+    wnsprintfW(path, ARRAYSIZE(path), L"\\\\wsl$\\%s\\mnt\\wsl\\%sp%u", st->dist, name, p);
+    if (!directoryExists(path)) {
+        WCHAR cmd[MAX_PATH];
+        wnsprintfW(cmd, ARRAYSIZE(cmd), L"--mount %s --partition %u", disk->path, p);
+
+        if (runWslAs(hwnd, cmd) != 0)
+            return;
+    }
+
+    SHELLEXECUTEINFO sei = {
+        .cbSize = sizeof(sei),
+        .lpVerb = L"open",
+        .lpFile = path,
+        .hwnd = hwnd,
+        .nShow = SW_NORMAL,
+    };
+    ShellExecuteExW(&sei);
 }
 
 static void onUnmountClicked(HWND hwnd, DWORD i)
