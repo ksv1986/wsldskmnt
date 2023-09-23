@@ -21,6 +21,7 @@ typedef struct err_desc {
 typedef struct part_info {
     DWORD index;
     ULONGLONG size;
+    WCHAR letter;
 } part_info;
 
 typedef struct disk_info {

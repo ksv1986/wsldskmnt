@@ -395,6 +395,7 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
 {
     HMENU menu = CreatePopupMenu();
     WCHAR text[256] = L"";
+    DWORD letters = 0;
 
     if (disk->e->error)
         appendError(menu, disk->e);
@@ -409,8 +410,14 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
         else
             for (DWORD j = 0; j < disk->n_parts; ++j) {
                 part_info* part = getPart(disk, j);
-                const WCHAR* suffix = L"MB";
 
+                WCHAR letter[8] = L"";
+                if (part->letter) {
+                    letters ++;
+                    wnsprintfW(letter, 8, L" (%c)", part->letter);
+                }
+
+                const WCHAR* suffix = L"MB";
                 ULONGLONG hi = part->size >> 10;
                 if (hi > (1000<<10)) {
                     suffix = L"GB";
@@ -420,11 +427,11 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
                 hi /= 1000;
 
                 if (hi < 10 && lo > 100)
-                    wnsprintfW(text, ARRAYSIZE(text), L"Part %u: %llu.%u%s",
-                        part->index, hi, lo / 10, suffix);
+                    wnsprintfW(text, ARRAYSIZE(text), L"Part %u%s: %llu.%u%s",
+                        part->index, letter, hi, lo / 10, suffix);
                 else
-                    wnsprintfW(text, ARRAYSIZE(text), L"Part #%u: %llu%s",
-                        part->index, hi, suffix);
+                    wnsprintfW(text, ARRAYSIZE(text), L"Part %u%s: %llu%s",
+                        part->index, letter, hi, suffix);
 
                 const DWORD n = MENU_PART + i * MAX_PARTS + j;
                 AppendMenuW(menu, MF_STRING, n, text);
@@ -434,8 +441,8 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
 
         AppendMenuW(menu, MF_STRING, MENU_UNMOUNT + i, L"&Unmount");
     }
-    wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u parts",
-        disk->index, disk->model, disk->n_parts);
+    wnsprintfW(text, ARRAYSIZE(text), L"&%u: %s %u/%u parts",
+        disk->index, disk->model, letters, disk->n_parts);
     text[ARRAYSIZE(text) - 1] = 0;
     AppendMenuW(parent, MF_STRING | MF_POPUP, (UINT_PTR)menu, text);
 }

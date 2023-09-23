@@ -20,6 +20,7 @@ static void resetPart(part_info* part)
 {
     part->index = 0;
     part->size = 0;
+    part->letter = 0;
 }
 
 static void resetDisk(disk_info* disk)
@@ -126,8 +127,47 @@ static ULONGLONG wtou64(const WCHAR *s)
     }
 }
 
-static void initPart(part_info* part, IWbemClassObject* pCls)
+typedef struct part_ctx {
+    IWbemServices* pSvc;
+    part_info* part;
+    WCHAR query[128];
+    WCHAR deviceId[128];
+} part_ctx;
+
+static HRESULT getPartLetter(part_ctx* ctx)
 {
+    part_info* part = ctx->part;
+    IWbemServices* pSvc = ctx->pSvc;
+
+    wnsprintfW(ctx->query, ARRAYSIZE(ctx->query),
+        L"ASSOCIATORS OF {Win32_DiskPartition.DeviceID=\"%s\"}"
+        L" WHERE AssocClass = Win32_LogicalDiskToPartition", ctx->deviceId);
+
+    IEnumWbemClassObject* pEnum = NULL;
+    HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", ctx->query, 0, NULL, &pEnum);
+    if (FAILED(hr))
+        return hr;
+
+    IWbemClassObject* pCls = NULL;
+    ULONG nr = 0;
+    pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr);
+    if (nr) {
+        VARIANT v[1];
+        VariantInit(v);
+        hr = pCls->lpVtbl->Get(pCls, L"DeviceID", 0, v, NULL, NULL);
+        if (!FAILED(hr))
+            part->letter = v->bstrVal[0];
+        VariantClear(v);
+        pCls->lpVtbl->Release(pCls);
+    }
+    pEnum->lpVtbl->Release(pEnum);
+    return hr;
+}
+
+static void initPart(part_ctx* ctx, IWbemClassObject* pCls)
+{
+    part_info* part = ctx->part;
+
     VARIANT v[1];
     VariantInit(v);
 #define GET(name, copy)                                                     \
@@ -141,16 +181,19 @@ static void initPart(part_info* part, IWbemClassObject* pCls)
     GET(Index, part->index = v->uintVal);
     // for some reason uint64 value is returned as string
     GET(Size, part->size = wtou64(v->bstrVal));
+    GET(DeviceID, StringCchCopyW(ctx->deviceId, ARRAYSIZE(ctx->deviceId), v->bstrVal));
 #undef GET
+
+    getPartLetter(ctx);
 }
 
 static HRESULT listParts(disk_info* disk, IWbemServices* pSvc)
 {
-    WCHAR query[128];
-    wnsprintfW(query, ARRAYSIZE(query), L"SELECT Index, Size from Win32_DiskPartition WHERE DiskIndex = %u", disk->index);
+    part_ctx ctx[1] = { {.pSvc = pSvc, } };
+    wnsprintfW(ctx->query, ARRAYSIZE(ctx->query), L"SELECT Index, Size, DeviceID from Win32_DiskPartition WHERE DiskIndex = %u", disk->index);
 
     IEnumWbemClassObject* pEnum = NULL;
-    HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
+    HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", ctx->query, 0, NULL, &pEnum);
     if (FAILED(hr))
         return setHresult(disk->e_parts, L"IWbemServices::ExecQuery failed", hr);
 
@@ -160,7 +203,10 @@ static HRESULT listParts(disk_info* disk, IWbemServices* pSvc)
     for (pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr); nr;
         pEnum->lpVtbl->Next(pEnum, WBEM_INFINITE, 1, &pCls, &nr))
     {
-        initPart(getPart(disk, i), pCls);
+        ctx->part = getPart(disk, i);
+        ctx->deviceId[0] = 0;
+
+        initPart(ctx, pCls);
         pCls->lpVtbl->Release(pCls);
 
         i++;
