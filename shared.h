@@ -41,9 +41,11 @@ typedef struct state {
     HWND hwnd;
     HMENU menu;
     HBITMAP shield;
+    UINT_PTR timer;
 
     IWbemLocator* locator;
     IWbemServices* services;
+    IEnumWbemClassObject* events;
 
     WCHAR dist[256]; // default wsl distribution name
 
@@ -66,6 +68,8 @@ void deinitDisks(state* st);
 // Returns 0 on success and GetLastError() on failure.
 HRESULT listDisks(state* st);
 void resetDisks(state* st);
+// Return TRUE if there was a disk added/removed
+BOOL pollDisks(state* st);
 
 static __inline disk_info* getDisk(state* st, DWORD i)
 {

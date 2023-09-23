@@ -310,8 +310,25 @@ HRESULT listDisks(state* st)
     return hr;
 }
 
+BOOL pollDisks(state* st)
+{
+    IEnumWbemClassObject* pEnum = st->events;
+    if (!pEnum)
+        return FALSE;
+
+    IWbemClassObject* pCls = NULL;
+    ULONG nr = 0;
+    pEnum->lpVtbl->Next(pEnum, WBEM_NO_WAIT, 1, &pCls, &nr);
+    if (!nr)
+        return FALSE;
+
+    pCls->lpVtbl->Release(pCls);
+    return TRUE;
+}
+
 void deinitDisks(state* st)
 {
+    st->events = release(st->events);
     st->services = release(st->services);
     st->locator = release(st->locator);
     pCode = release(pCode);
@@ -346,6 +363,17 @@ static HRESULT setupDisks(state* st)
     );
     if (FAILED(hr))
         return setHresult(st->e, L"CoSetProxyBlanket failed", hr);
+
+    hr = pSvc->lpVtbl->ExecNotificationQuery(
+        pSvc,
+        L"WQL",
+        L"SELECT * from Win32_VolumeChangeEvent",
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+        NULL,
+        &st->events);
+    // missing events is not a hard error
+    if (FAILED(hr))
+        setHresult(st->e, L"IWbemServices::ExecNotificationQuery failed", hr);
 
     return 0;
 }

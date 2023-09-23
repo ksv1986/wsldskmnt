@@ -25,6 +25,7 @@ static const GUID GUID_NOTIFY = {
 };
 
 static const WCHAR* WSL_PATH = L"C:\\Windows\\System32\\wsl.exe";
+static const UINT DISK_POLL_MS = 500;
 
 #define NIDINIT(name, hwnd) {       \
         .cbSize = sizeof(name),     \
@@ -460,6 +461,11 @@ static void createDisksMenu(state* st)
     AppendMenuW(st->menu, MF_STRING, MENU_EXIT, L"&Exit");
 }
 
+static void cleanDisksMenu(state* st)
+{
+    while (DeleteMenu(st->menu, 0, MF_BYPOSITION));
+}
+
 static HBITMAP convertToBitmap(HICON icon)
 {
     ICONINFOEX ii = { .cbSize = sizeof(ii), };
@@ -516,7 +522,7 @@ static DWORD parseDistroList(HWND hwnd, DWORD exitCode, const WCHAR* text, DWORD
     }
 }
 
-static void getDefaultDistribution(HWND hwnd, state *st)
+static void getDefaultDistribution(HWND hwnd, state* st)
 {
     WCHAR cmd[MAX_PATH];
     wnsprintfW(cmd, ARRAYSIZE(cmd), L"--list -v");
@@ -525,6 +531,26 @@ static void getDefaultDistribution(HWND hwnd, state *st)
     if (st->dist[0])
         text = st->dist;
     InsertMenuW(st->menu, 0, MF_BYPOSITION | MF_STRING | MF_DISABLED, 0, st->dist);
+}
+
+static LRESULT onTimer(HWND hwnd)
+{
+    state* st = getState(hwnd);
+    if (pollDisks(st)) {
+        cleanDisksMenu(st);
+        resetDisks(st);
+        listDisks(st);
+        createDisksMenu(st);
+    }
+    return 0;
+}
+
+static void initTimer(state* st)
+{
+    if (!st->events)
+        return;
+
+    st->timer = SetTimer(st->hwnd, (UINT_PTR)st, DISK_POLL_MS, NULL);
 }
 
 static LRESULT onCreate(HWND hwnd, LPARAM lparam)
@@ -541,8 +567,10 @@ static LRESULT onCreate(HWND hwnd, LPARAM lparam)
         return GetLastError();
     }
 
-    if (!initDisks(st))
+    if (!initDisks(st)) {
         listDisks(st);
+        initTimer(st);
+    }
 
     st->menu = CreatePopupMenu();
     if (!st->menu)
@@ -562,6 +590,7 @@ static void onDestroy(HWND hwnd)
 {
     state* st = getState(hwnd);
 
+    KillTimer(st->hwnd, st->timer);
     removeTrayIcon(hwnd);
     DestroyMenu(st->menu);
     DeleteObject(st->shield);
@@ -584,6 +613,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT umsg, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_COMMAND:
         return onMenuCommand(hwnd, wparam, lparam);
+    case WM_TIMER:
+        return onTimer(hwnd);
     case APP_NOTIFY:
         return onTrayCallback(hwnd, wparam, lparam);
     }
