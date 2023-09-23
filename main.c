@@ -411,9 +411,11 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
             for (DWORD j = 0; j < disk->n_parts; ++j) {
                 part_info* part = getPart(disk, j);
 
+                DWORD disabled = 0;
                 WCHAR letter[8] = L"";
                 if (part->letter) {
                     letters ++;
+                    disabled = MF_DISABLED;
                     wnsprintfW(letter, 8, L" (%c)", part->letter);
                 }
 
@@ -434,7 +436,7 @@ static void createDiskMenu(HMENU parent, DWORD i, disk_info* disk, HBITMAP shiel
                         part->index, letter, hi, suffix);
 
                 const DWORD n = MENU_PART + i * MAX_PARTS + j;
-                AppendMenuW(menu, MF_STRING, n, text);
+                AppendMenuW(menu, MF_STRING | disabled, n, text);
                 if (shield)
                     SetMenuItemBitmaps(menu, n, MF_BYCOMMAND, shield, shield);
             }
