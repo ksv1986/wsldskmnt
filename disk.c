@@ -146,8 +146,8 @@ static void initPart(part_info* part, IWbemClassObject* pCls)
 
 static HRESULT listParts(disk_info* disk, IWbemServices* pSvc)
 {
-    WCHAR query[64];
-    wnsprintfW(query, ARRAYSIZE(query), L"SELECT * from Win32_DiskPartition WHERE DiskIndex = %u", disk->index);
+    WCHAR query[128];
+    wnsprintfW(query, ARRAYSIZE(query), L"SELECT Index, Size from Win32_DiskPartition WHERE DiskIndex = %u", disk->index);
 
     IEnumWbemClassObject* pEnum = NULL;
     HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
@@ -214,7 +214,8 @@ static HRESULT servicesListDisks(state* st, IWbemServices * pSvc)
         return setHresult(st->e, L"CoSetProxyBlanket failed", hr);
 
     IEnumWbemClassObject* pEnum = NULL;
-    hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", L"SELECT * from Win32_DiskDrive", 0, NULL, &pEnum);
+    static WCHAR query[] = L"SELECT Index, Model, DeviceID, Partitions from Win32_DiskDrive";
+    hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
     if (FAILED(hr))
         return setHresult(st->e, L"IWbemServices::ExecQuery failed", hr);
 
