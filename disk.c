@@ -9,6 +9,16 @@ static IWbemStatusCodeText* pCode;
 
 static void ignore(HRESULT hr) { UNREFERENCED_PARAMETER(hr); }
 
+static void* release(void* any)
+{
+    if (!any)
+        return NULL;
+
+    IUnknown* p = any;
+    p->lpVtbl->Release(p);
+    return NULL;
+}
+
 void resetErr(err_desc* e)
 {
     e->title = NULL;
@@ -42,11 +52,6 @@ void resetDisks(state* st)
         resetDisk(getDisk(st, st->n_disks));
     }
     resetErr(st->e);
-
-    if (pCode) {
-        pCode->lpVtbl->Release(pCode);
-        pCode = NULL;
-    }
 }
 
 static DWORD returnErr(err_desc* e)
@@ -242,26 +247,11 @@ static HRESULT initDisk(disk_info* disk, IWbemClassObject* pCls)
     return 0;
 }
 
-static HRESULT servicesListDisks(state* st, IWbemServices * pSvc)
+static HRESULT servicesListDisks(state* st, IWbemServices* pSvc)
 {
-    // https://learn.microsoft.com/en-us/windows/win32/wmisdk/example--getting-wmi-data-from-the-local-computer
-    // Without proxy blanket ExecQuery returns 0x80041003 "Access denied"
-    HRESULT hr = CoSetProxyBlanket(
-        (IUnknown*)pSvc,             // Indicates the proxy to set
-        RPC_C_AUTHN_WINNT,
-        RPC_C_AUTHZ_NONE,
-        NULL,                        // Server principal name
-        RPC_C_AUTHN_LEVEL_CALL,
-        RPC_C_IMP_LEVEL_IMPERSONATE,
-        NULL,                        // client identity
-        EOAC_NONE                    // proxy capabilities
-    );
-    if (FAILED(hr))
-        return setHresult(st->e, L"CoSetProxyBlanket failed", hr);
-
     IEnumWbemClassObject* pEnum = NULL;
     static WCHAR query[] = L"SELECT Index, Model, DeviceID, Partitions from Win32_DiskDrive";
-    hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
+    HRESULT hr = pSvc->lpVtbl->ExecQuery(pSvc, L"WQL", query, 0, NULL, &pEnum);
     if (FAILED(hr))
         return setHresult(st->e, L"IWbemServices::ExecQuery failed", hr);
 
@@ -285,18 +275,6 @@ static HRESULT servicesListDisks(state* st, IWbemServices * pSvc)
 
     pEnum->lpVtbl->Release(pEnum);
     return 0;
-}
-
-static HRESULT locatorListDisks(state* st, IWbemLocator* pLoc)
-{
-    IWbemServices* pSvc = NULL;
-    HRESULT hr = pLoc->lpVtbl->ConnectServer(pLoc, L"ROOT\\CIMV2", NULL, NULL, 0, 0, 0, 0, &pSvc);
-    if (FAILED(hr))
-        return setHresult(st->e, L"IWbemLocator::ConnectServer failed", hr);
-
-    hr = servicesListDisks(st, pSvc);
-    pSvc->lpVtbl->Release(pSvc);
-    return hr;
 }
 
 static void swapDisks(disk_info* l, disk_info* r)
@@ -324,16 +302,58 @@ static void sortDisks(state* st)
 
 HRESULT listDisks(state* st)
 {
-    IWbemLocator* pLoc = NULL;
-    HRESULT hr = CoCreateInstance(&CLSID_WbemLocator, 0,
-        CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (!st->services)
+        return st->e->error;
+
+    HRESULT hr = servicesListDisks(st, st->services);
+    sortDisks(st);
+    return hr;
+}
+
+void deinitDisks(state* st)
+{
+    st->services = release(st->services);
+    st->locator = release(st->locator);
+    pCode = release(pCode);
+}
+
+static HRESULT setupDisks(state* st)
+{
+    HRESULT hr;
+    hr = CoCreateInstance(&CLSID_WbemLocator, 0,
+        CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (LPVOID*)&st->locator);
 
     if (FAILED(hr))
         return setHresult(st->e, L"Failed to create IWbemLocator instance", hr);
 
-    hr = locatorListDisks(st, pLoc);
-    pLoc->lpVtbl->Release(pLoc);
+    IWbemLocator* pLoc = st->locator;
+    hr = pLoc->lpVtbl->ConnectServer(pLoc, L"ROOT\\CIMV2", NULL, NULL, 0, 0, 0, 0, &st->services);
+    if (FAILED(hr))
+        return setHresult(st->e, L"IWbemLocator::ConnectServer failed", hr);
 
-    sortDisks(st);
+    IWbemServices* pSvc = st->services;
+    // https://learn.microsoft.com/en-us/windows/win32/wmisdk/example--getting-wmi-data-from-the-local-computer
+    // Without proxy blanket ExecQuery returns 0x80041003 "Access denied"
+    hr = CoSetProxyBlanket(
+        (IUnknown*)pSvc,             // Indicates the proxy to set
+        RPC_C_AUTHN_WINNT,
+        RPC_C_AUTHZ_NONE,
+        NULL,                        // Server principal name
+        RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_IMP_LEVEL_IMPERSONATE,
+        NULL,                        // client identity
+        EOAC_NONE                    // proxy capabilities
+    );
+    if (FAILED(hr))
+        return setHresult(st->e, L"CoSetProxyBlanket failed", hr);
+
+    return 0;
+}
+
+HRESULT initDisks(state* st)
+{
+    HRESULT hr = setupDisks(st);
+    if (FAILED(hr))
+        deinitDisks(st);
     return hr;
 }

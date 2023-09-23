@@ -541,7 +541,8 @@ static LRESULT onCreate(HWND hwnd, LPARAM lparam)
         return GetLastError();
     }
 
-    listDisks(st);
+    if (!initDisks(st))
+        listDisks(st);
 
     st->menu = CreatePopupMenu();
     if (!st->menu)
@@ -566,6 +567,7 @@ static void onDestroy(HWND hwnd)
     DeleteObject(st->shield);
 
     resetDisks(st);
+    deinitDisks(st);
 
     CoUninitialize();
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <WbemCli.h>
 
 // Dynamic allocations are good if we need lots of memory.
 // But this a simple program. It has simple needs.
@@ -41,6 +42,9 @@ typedef struct state {
     HMENU menu;
     HBITMAP shield;
 
+    IWbemLocator* locator;
+    IWbemServices* services;
+
     WCHAR dist[256]; // default wsl distribution name
 
     err_desc e[1]; // if there was a problem to enumerate disks
@@ -54,6 +58,9 @@ void resetErr(err_desc* e);
 
 DWORD setError(err_desc* e, PCWCH title);
 DWORD setErrorCode(err_desc* e, PCWCH title, DWORD code);
+
+HRESULT initDisks(state* st);
+void deinitDisks(state* st);
 
 // Enumerate physical disks and fill disk_info array.
 // Returns 0 on success and GetLastError() on failure.
